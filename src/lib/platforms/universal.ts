@@ -1,9 +1,9 @@
-import { PlatformAdapter, PlatformMetadata, DownloadOptionsResponse, DownloadOption } from './types';
-import { getVideoInfo, downloadVideoLocal } from '../downloader';
+import { PlatformAdapter, NormalizedMetadata, NormalizedFormat } from './types';
+import { getVideoInfo, VideoInfo } from '../downloader';
+import { AppError } from '../errors';
 
 export class UniversalAdapter implements PlatformAdapter {
   detect(url: string): boolean {
-    // yt-dlp can handle almost any URL, so we loosely accept http/https
     return /^https?:\/\//i.test(url);
   }
 
@@ -11,82 +11,78 @@ export class UniversalAdapter implements PlatformAdapter {
     return this.detect(url);
   }
 
-  async getMetadata(url: string, browser?: string): Promise<PlatformMetadata | null> {
-    const info = await getVideoInfo(url, browser);
-    if (!info) return null;
+  async extract(url: string): Promise<NormalizedMetadata> {
+    const info = await getVideoInfo(url);
+    if (!info) {
+      throw new AppError('FETCH_FAILED', 'Could not fetch metadata. Try another public URL.', 422);
+    }
 
-    return {
-      title: info.title,
-      thumbnail: info.thumbnail,
-      creatorName: info.uploader,
-      duration: info.duration,
-      type: 'video', // we can refine this later if needed
-      platform: (info.platform as any) || 'youtube', // generic fallback
-      isPublic: true, // We bypass restrictions, so treat as public
-    };
+    return this.mapVideoInfoToNormalized(info, url);
   }
 
-  async getDownloadOptions(url: string, userConsent: boolean, browser?: string): Promise<DownloadOptionsResponse> {
-    const info = await getVideoInfo(url, browser);
-    
-    if (!info) {
-      return { allowed: false, reason: 'Unable to parse video. Ensure the URL is correct or authentication cookies are valid.' };
-    }
-
-    const options: DownloadOption[] = [];
-
-    // 1. Add Best Quality (Video + Voice)
-    const bestAvFormat = info.formats?.find((f: any) => f.vcodec !== 'none' && f.acodec !== 'none');
-    options.push({
-      id: 'best',
-      quality: 'Best Quality (Video + Voice)',
-      format: 'mp4',
-      sizeBytes: bestAvFormat?.filesize || info.formats?.[0]?.filesize || 0,
-      url: `/api/download?url=${encodeURIComponent(url)}&formatId=best`,
-      type: 'video'
-    });
-
-    // 2. Add MP3 Audio Option
-    const bestAudioFormat = info.formats?.find((f: any) => f.vcodec === 'none' && f.acodec !== 'none');
-    options.push({
-      id: 'mp3',
-      quality: 'MP3 Audio Only (Voice)',
-      format: 'mp3',
-      sizeBytes: bestAudioFormat?.filesize || 0,
-      url: `/api/download?url=${encodeURIComponent(url)}&formatId=mp3`,
-      type: 'audio'
-    });
-
-    // 3. Add available video formats
-    if (info.formats) {
-      const resolutionsAdded = new Set<string>();
+  public mapVideoInfoToNormalized(info: VideoInfo, originalUrl: string): NormalizedMetadata {
+    const formats: NormalizedFormat[] = (info.formats || []).map((f) => {
+      const isVideo = f.vcodec && f.vcodec !== 'none';
+      const isAudio = f.acodec && f.acodec !== 'none';
       
-      for (const f of info.formats) {
-        if (f.vcodec && f.vcodec !== 'none') {
-          let resName = f.resolution;
-          if (resName && resName.includes('x')) {
-            resName = resName.split('x')[1] + 'p';
-          }
-          
-          if (!resName || resolutionsAdded.has(resName)) continue;
-          resolutionsAdded.add(resName);
-
-          options.push({
-            id: f.format_id,
-            quality: `${resName} Quality (MP4)`,
-            format: f.ext || 'mp4',
-            sizeBytes: f.filesize || 0,
-            url: `/api/download?url=${encodeURIComponent(url)}&formatId=${f.format_id}`,
-            type: 'video'
-          });
-        }
+      let label = 'Media Stream';
+      if (isVideo && isAudio) {
+        label = `Video + Audio (${f.resolution})`;
+      } else if (isVideo) {
+        label = `Video Only (${f.resolution})`;
+      } else if (isAudio) {
+        label = `Audio Only`;
       }
+
+      return {
+        formatId: f.format_id,
+        label,
+        ext: f.ext || 'mp4',
+        resolution: f.resolution || 'unknown',
+        filesize: f.filesize || undefined,
+        hasVideo: !!isVideo,
+        hasAudio: !!isAudio,
+        url: `/api/download?url=${encodeURIComponent(originalUrl)}&formatId=${f.format_id}`
+      };
+    });
+
+    // Unshift a direct "Best Quality" merge format
+    formats.unshift({
+      formatId: 'best',
+      label: 'Best Quality (Video + Voice)',
+      ext: 'mp4',
+      resolution: 'Auto',
+      hasVideo: true,
+      hasAudio: true,
+      url: `/api/download?url=${encodeURIComponent(originalUrl)}&formatId=best`
+    });
+
+    // Push a direct "MP3 Audio" extract format
+    formats.push({
+      formatId: 'mp3',
+      label: 'Audio Only (MP3)',
+      ext: 'mp3',
+      resolution: 'Audio',
+      hasVideo: false,
+      hasAudio: true,
+      url: `/api/download?url=${encodeURIComponent(originalUrl)}&formatId=mp3`
+    });
+
+    // Detect mediaType
+    let mediaType: 'video' | 'audio' | 'photo' | 'carousel' | 'unknown' = 'video';
+    if (info.platform?.toLowerCase().includes('instagram') && originalUrl.includes('/p/')) {
+      mediaType = 'photo';
     }
 
     return {
-      allowed: true,
-      options,
-      sourceUrl: url
+      id: info.id,
+      platform: info.platform || 'generic',
+      title: info.title,
+      thumbnail: info.thumbnail || undefined,
+      duration: info.duration || undefined,
+      uploader: info.uploader || undefined,
+      mediaType,
+      formats
     };
   }
 }

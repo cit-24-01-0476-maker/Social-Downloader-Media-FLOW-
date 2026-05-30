@@ -20,7 +20,6 @@ import {
   Trash2,
   Volume2,
   ChevronDown,
-  ChevronUp,
   Zap,
   Globe
 } from 'lucide-react';
@@ -61,19 +60,22 @@ interface JobStatus {
 export default function Home() {
   const { t } = useLanguage();
 
+  // Hydration state
+  const [mounted, setMounted] = useState(false);
+
   // Form States
   const [url, setUrl] = useState('');
   
   // App Logic States
   const [uiState, setUiState] = useState<'IDLE' | 'ANALYZING' | 'ANALYZED' | 'PREPARING_JOB' | 'QUEUE_PROCESSING' | 'COMPLETED' | 'FAILED'>('IDLE');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   
   // Data States
   const [metadata, setMetadata] = useState<any>(null);
   const [platform, setPlatform] = useState<string>('');
   const [downloadOptions, setDownloadOptions] = useState<any[]>([]);
   const [selectedFormatId, setSelectedFormatId] = useState<string>('best');
-  const [selectedBrowser, setSelectedBrowser] = useState<string>('none');
   const [jobId, setJobId] = useState<string>('');
   const [jobDetails, setJobDetails] = useState<JobStatus | null>(null);
   
@@ -85,8 +87,9 @@ export default function Home() {
   // Polling ref
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Stop polling on unmount
+  // Stop polling on unmount and enforce hydration trigger
   useEffect(() => {
+    setMounted(true);
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
@@ -137,6 +140,7 @@ export default function Home() {
 
     setUiState('ANALYZING');
     setErrorMsg(null);
+    setErrorCode(null);
     setMetadata(null);
 
     try {
@@ -144,25 +148,28 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          url: url.trim(),
-          browser: selectedBrowser
+          url: url.trim()
         })
       });
 
       const data = await res.json();
 
-      if (!res.ok) {
-        throw new Error(data.error || t('form.genericError'));
+      if (!res.ok || !data.success) {
+        setErrorMsg(data.error || t('form.genericError'));
+        setErrorCode(data.code || 'FETCH_FAILED');
+        setUiState('FAILED');
+        return;
       }
 
       setMetadata(data.metadata);
-      setPlatform(data.platform);
-      setDownloadOptions(data.options || []);
+      setPlatform(data.metadata.platform);
+      setDownloadOptions(data.metadata.formats || []);
       setSelectedFormatId('best');
       setUiState('ANALYZED');
     } catch (err: any) {
       console.error('[MediaFlow UI] Analysis failed:', err);
-      setErrorMsg(err.message);
+      setErrorMsg(err.message || 'Could not fetch metadata. Try another public URL.');
+      setErrorCode('FETCH_FAILED');
       setUiState('FAILED');
     }
   };
@@ -171,6 +178,7 @@ export default function Home() {
   const handleStartDownload = async () => {
     setUiState('PREPARING_JOB');
     setErrorMsg(null);
+    setErrorCode(null);
 
     try {
       const res = await fetch('/api/download', {
@@ -178,26 +186,28 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: url.trim(),
-          platform,
-          formatId: selectedFormatId,
-          browser: selectedBrowser
+          formatId: selectedFormatId
         })
       });
 
       const data = await res.json();
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to submit download job.');
+      if (!res.ok || !data.success) {
+        setErrorMsg(data.error || 'Failed to submit download job.');
+        setErrorCode(data.code || 'DOWNLOAD_FAILED');
+        setUiState('FAILED');
+        return;
       }
 
       setJobId(data.jobId);
       setUiState('QUEUE_PROCESSING');
       
-      // Start High-speed Polling Job Progress (400ms for extra-responsive updates!)
+      // Start High-speed Polling Job Progress (400ms)
       startPolling(data.jobId);
     } catch (err: any) {
       console.error('[MediaFlow UI] Download submission failed:', err);
-      setErrorMsg(err.message);
+      setErrorMsg(err.message || 'An unexpected error occurred.');
+      setErrorCode('DOWNLOAD_FAILED');
       setUiState('FAILED');
     }
   };
@@ -212,7 +222,11 @@ export default function Home() {
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-          throw new Error(data.error || 'Error polling job');
+          setErrorMsg(data.error || 'Error polling job status.');
+          setErrorCode(data.code || 'DOWNLOAD_FAILED');
+          setUiState('FAILED');
+          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+          return;
         }
 
         const job: JobStatus = data.job;
@@ -224,15 +238,17 @@ export default function Home() {
         } else if (job.status === 'FAILED') {
           if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
           setErrorMsg(job.errorMessage || t('status.failed'));
+          setErrorCode('DOWNLOAD_FAILED');
           setUiState('FAILED');
         }
       } catch (err: any) {
         console.error('[MediaFlow UI] Polling error:', err);
         if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-        setErrorMsg(err.message);
+        setErrorMsg(err.message || 'Failed to sync processing job status.');
+        setErrorCode('DOWNLOAD_FAILED');
         setUiState('FAILED');
       }
-    }, 400); // Polling speed increased from 850ms to 400ms for real-time smoothness
+    }, 400);
   };
 
   // Reset all states
@@ -240,6 +256,7 @@ export default function Home() {
     setUrl('');
     setUiState('IDLE');
     setErrorMsg(null);
+    setErrorCode(null);
     setMetadata(null);
     setPlatform('');
     setDownloadOptions([]);
@@ -286,6 +303,11 @@ export default function Home() {
     }
   };
 
+  // Prevent initial hydration mismatches entirely
+  if (!mounted) {
+    return null;
+  }
+
   // FAQs Data
   const faqs = [
     {
@@ -297,12 +319,12 @@ export default function Home() {
       a: "Absolutely! I have completely optimized our local security routing layer to operate cleanly. Whether you're using a personal proxy, school network, or a private VPN client, MediaFlow bypasses loopback checks and handles requests normally without throwing blocked screens."
     },
     {
-      q: "How does the 'Bypass Bot Verification' cookie dropdown work?",
-      a: "YouTube and other major sites often trigger bot challenges (`Sign in to confirm you're not a bot`). Because your MediaFlow server is running locally on your computer, selecting Chrome, Edge, Firefox, or Brave in the dropdown securely binds your active browser session cookies. This acts as your personal verification, completely and instantly bypassing bot walls!"
+      q: "How can I download content that requires cookies or login?",
+      a: "MediaFlow is built with strict privacy and safety rules: we never automatically scrape your browser cookies or capture your session. If a public link requires authentication (e.g. age-gated YouTube links), you can optionally provide a Netscape cookies.txt file by setting the `YTDLP_COOKIES_FILE` environment variable on your server."
     },
     {
-      q: "Can I download private profiles or restricted links?",
-      a: "Yes! If you are logged into your accounts on the selected browser, sharing cookies via the verification dropdown lets you download content that you normally have access to, even if the profile is set to private."
+      q: "Why do I see a hydration warning mentioning 'bis_skin_checked' in the console?",
+      a: "This is a common harmless console warning triggered by browser extensions (like Color Pickers or custom stylesheet skin customizers). These extensions inject attributes like 'bis_skin_checked=\"1\"' directly into HTML elements before React can hydrate, causing a false mismatch warning. You can safely ignore this warning or disable the extension in incognito mode!"
     }
   ];
 
@@ -374,15 +396,24 @@ export default function Home() {
                 </div>
               </div>
 
-
-
-              {/* Error messages */}
+              {/* Polished Inline Error Alert Cards */}
               {errorMsg && (
                 <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4.5 text-sm text-red-400 flex items-start gap-3">
                   <AlertTriangle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-semibold block text-white mb-0.5">Processing Blocked</span>
+                    <span className="font-semibold block text-white mb-0.5">
+                      {errorCode === 'COOKIES_REQUIRED' && 'Authentication Required'}
+                      {errorCode === 'PRIVATE_CONTENT' && 'Private Content Blocked'}
+                      {errorCode === 'UNSUPPORTED_URL' && 'Unsupported Link'}
+                      {errorCode === 'FETCH_FAILED' && 'Connection Failed'}
+                      {!['COOKIES_REQUIRED', 'PRIVATE_CONTENT', 'UNSUPPORTED_URL', 'FETCH_FAILED'].includes(errorCode || '') && 'Processing Blocked'}
+                    </span>
                     <span className="text-zinc-400 leading-normal">{errorMsg}</span>
+                    {errorCode === 'COOKIES_REQUIRED' && (
+                      <p className="text-[11px] text-zinc-500 mt-2 font-sans border-t border-white/5 pt-2">
+                        💡 Admin Tip: Place a Netscape <code>cookies.txt</code> file in your server directory and define the <code>YTDLP_COOKIES_FILE</code> env variable to bypass access locks.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -445,10 +476,10 @@ export default function Home() {
                   
                   <div className="space-y-1.5 text-xs text-zinc-400">
                     <p className="flex items-center gap-1.5">
-                      <User className="h-3.5 w-3.5 text-zinc-500" /> Creator: <span className="font-semibold text-white">{metadata.creatorName}</span>
+                      <User className="h-3.5 w-3.5 text-zinc-500" /> Creator: <span className="font-semibold text-white">{metadata.uploader || 'Unknown'}</span>
                     </p>
                     <p className="flex items-center gap-1.5">
-                      <Video className="h-3.5 w-3.5 text-zinc-500" /> Backup Target: <span className="font-semibold text-white capitalize">{metadata.type}</span>
+                      <Video className="h-3.5 w-3.5 text-zinc-500" /> Media Type: <span className="font-semibold text-white capitalize">{metadata.mediaType}</span>
                     </p>
                   </div>
                 </div>
@@ -468,11 +499,11 @@ export default function Home() {
                     >
                       {downloadOptions.map((opt: any) => (
                         <option 
-                          key={opt.id} 
-                          value={opt.id} 
+                          key={opt.formatId} 
+                          value={opt.formatId} 
                           className="bg-[#0b0f19] text-white"
                         >
-                          {opt.quality} ({opt.format.toUpperCase()}) {opt.sizeBytes > 0 ? ` ~ ${formatSize(opt.sizeBytes)}` : ' (Optimized Size)'}
+                          {opt.label} ({opt.ext.toUpperCase()}){opt.filesize && opt.filesize > 0 ? ` ~ ${formatSize(opt.filesize)}` : ' (Optimized)'}
                         </option>
                       ))}
                     </select>
@@ -661,7 +692,7 @@ export default function Home() {
               <Tv className="h-5.5 w-5.5" />
             </div>
             <h3 className="text-base font-bold text-white">TikTok Downloader</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed">Backup TikTok videos with zero watermarks. Dyn-merged video and voice track.</p>
+            <p className="text-xs text-zinc-400 leading-relaxed">Backup TikTok videos cleanly. Dynamic extraction of video and audio tracks.</p>
           </div>
 
           {/* Facebook */}
@@ -670,7 +701,7 @@ export default function Home() {
               <FacebookIcon className="h-5.5 w-5.5" />
             </div>
             <h3 className="text-base font-bold text-white">Facebook Downloader</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed">Download public and private Facebook videos cleanly in any quality resolution.</p>
+            <p className="text-xs text-zinc-400 leading-relaxed">Download public and authorized Facebook videos cleanly in HD quality.</p>
           </div>
 
           {/* Instagram */}
@@ -679,13 +710,13 @@ export default function Home() {
               <InstagramIcon className="h-5.5 w-5.5" />
             </div>
             <h3 className="text-base font-bold text-white">Instagram Downloader</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed">Save Instagram Reels, posts, and IGTV videos in high-speed MP4 container.</p>
+            <p className="text-xs text-zinc-400 leading-relaxed">Save Instagram Reels, public posts, and photos cleanly in high speed.</p>
           </div>
 
         </div>
       </div>
 
-      {/* 4. Professional interactive FAQ Section Accordion */}
+      {/* 4. FAQs Section */}
       <div className="mt-24 space-y-8">
         <div className="text-center">
           <h2 className="text-2xl font-bold tracking-tight text-white sm:text-4xl">
@@ -731,7 +762,6 @@ export default function Home() {
       {/* 5. Safety & Compliance Statement Banner */}
       <div className="mt-24">
         <div className="glass-panel rounded-3xl p-6 sm:p-9 space-y-5 border-l-4 border-l-violet-500 shadow-xl relative overflow-hidden">
-          {/* Subtle decoration */}
           <div className="absolute -top-12 -right-12 h-36 w-36 bg-violet-600/10 rounded-full blur-2xl"></div>
           
           <div className="flex items-center gap-2.5 text-violet-400">

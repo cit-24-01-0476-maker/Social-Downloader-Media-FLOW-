@@ -1,13 +1,13 @@
 # Multi-stage build for optimal production size
 
 # 1. Dependency installer
-FROM node:18-alpine AS deps
+FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
 # 2. Builder
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -18,12 +18,15 @@ RUN npx prisma generate || true
 RUN npm run build
 
 # 3. Runner
-FROM node:18-alpine AS runner
+FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV production
 ENV PORT 3000
 ENV HOSTNAME "0.0.0.0"
+
+# Install Python3 and FFmpeg required for the downloader (මෙය අත්‍යවශ්‍යයි)
+RUN apk add --no-cache python3 ffmpeg
 
 # Setup non-root execution for container safety
 RUN addgroup --system --gid 1001 nodejs

@@ -36,6 +36,11 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Netscape cookies.txt files
+cookies.txt
+*.cookies.txt
+
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

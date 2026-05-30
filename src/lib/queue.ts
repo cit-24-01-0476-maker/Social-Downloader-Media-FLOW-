@@ -30,7 +30,7 @@ async function processDownloadJob(jobId: string, url: string, platform: string, 
       data: { status: 'PROCESSING', progress: 10 }
     });
 
-    const info = await getVideoInfo(url, browser);
+    const info = await getVideoInfo(url);
     if (!info) {
       throw new Error('Could not retrieve metadata. The content may be restricted or invalid.');
     }
@@ -53,7 +53,7 @@ async function processDownloadJob(jobId: string, url: string, platform: string, 
 
     // 2. Perform the actual download via yt-dlp
     console.log(`[MediaFlow Queue] Downloading video for job ${jobId}...`);
-    const downloadUrl = await downloadVideoLocal(url, formatId, browser);
+    const downloadUrl = await downloadVideoLocal(url, formatId);
     
     // We update progress to 90
     await db.downloadJob.update({
