@@ -4,6 +4,8 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
+# Tell youtube-dl-exec to skip Python check during npm install
+ENV YOUTUBE_DL_SKIP_PYTHON_CHECK=1
 RUN npm ci
 
 # 2. Builder
@@ -25,8 +27,10 @@ ENV NODE_ENV production
 ENV PORT 3000
 ENV HOSTNAME "0.0.0.0"
 
-# Install Python3 and FFmpeg required for the downloader (මෙය අත්‍යවශ්‍යයි)
+# Install Python3 and FFmpeg required for the downloader
 RUN apk add --no-cache python3 ffmpeg
+# Create a symlink so the 'python' command points to 'python3' correctly
+RUN ln -sf /usr/bin/python3 /usr/bin/python
 
 # Setup non-root execution for container safety
 RUN addgroup --system --gid 1001 nodejs
