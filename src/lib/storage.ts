@@ -12,7 +12,10 @@ export interface StorageProvider {
 // Simulated local storage provider
 class LocalDevStorageProvider implements StorageProvider {
   constructor() {
-    console.log('[MediaFlow Storage] 📂 Using Local Development Storage Provider');
+    if (process.env.NODE_ENV === 'development' && !(global as any).hasLoggedStorageProviderLog) {
+      console.log('[MediaFlow Storage] 📂 Using Local Development Storage Provider');
+      (global as any).hasLoggedStorageProviderLog = true;
+    }
   }
 
   async uploadFile(key: string, fileBuffer: Buffer, contentType: string): Promise<string> {
@@ -32,7 +35,10 @@ class S3StorageProvider implements StorageProvider {
 
   constructor() {
     this.bucketName = process.env.S3_BUCKET_NAME || 'mediaflow-storage';
-    console.log(`[MediaFlow Storage] ☁️ Initialized S3-compatible Storage Provider (Bucket: ${this.bucketName})`);
+    if (process.env.NODE_ENV === 'development' && !(global as any).hasLoggedStorageProviderLog) {
+      console.log(`[MediaFlow Storage] ☁️ Initialized S3-compatible Storage Provider (Bucket: ${this.bucketName})`);
+      (global as any).hasLoggedStorageProviderLog = true;
+    }
   }
 
   async uploadFile(key: string, fileBuffer: Buffer, contentType: string): Promise<string> {

@@ -14,7 +14,10 @@ class InMemoryDatabase {
   private abuseFlags: any[] = [];
 
   constructor() {
-    console.warn('[MediaFlow DB] ⚠️ Running in Mock In-Memory Database Mode. Config DATABASE_URL to connect to PostgreSQL.');
+    if (process.env.NODE_ENV === 'development' && !(global as any).hasLoggedMockDbWarning) {
+      console.log('[MediaFlow DB] 📡 Running in In-Memory Database Mode (No DATABASE_URL configured).');
+      (global as any).hasLoggedMockDbWarning = true;
+    }
     // Seed some mock users and statistics
     this.users.push({
       id: 'admin-mock-id',
