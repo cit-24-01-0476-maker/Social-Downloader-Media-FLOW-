@@ -4,7 +4,13 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-# Tell youtube-dl-exec to skip Python check during npm install
+
+# GitHub Token එක Render හරහා Docker build එකට ලබා ගැනීම
+# (මෙය yt-dlp ස්ථාපනයේදී එන Rate Limit Error එක වළක්වයි)
+ARG GITHUB_TOKEN
+ENV GITHUB_TOKEN=$GITHUB_TOKEN
+
+# youtube-dl-exec ස්ථාපනය වන විට Python සෙවීම නතර කිරීම
 ENV YOUTUBE_DL_SKIP_PYTHON_CHECK=1
 RUN npm ci
 
@@ -27,9 +33,10 @@ ENV NODE_ENV production
 ENV PORT 3000
 ENV HOSTNAME "0.0.0.0"
 
-# Install Python3 and FFmpeg required for the downloader
+# Downloader එක සඳහා අත්‍යවශ්‍ය Python3 සහ FFmpeg ස්ථාපනය කිරීම
 RUN apk add --no-cache python3 ffmpeg
-# Create a symlink so the 'python' command points to 'python3' correctly
+
+# App එක 'python' කියා සෙවූ විට එය නිවැරදිව 'python3' වෙත යොමු කිරීම
 RUN ln -sf /usr/bin/python3 /usr/bin/python
 
 # Setup non-root execution for container safety
