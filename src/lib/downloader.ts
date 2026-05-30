@@ -15,10 +15,20 @@ const binaryPath = path.join(
 
 const youtubedl = create(binaryPath);
 
-// Helper to ensure the temp storage directory exists
-const TMP_DIR = path.join(process.cwd(), 'public', 'downloads');
+import os from 'os';
+
+// Helper to ensure the temp storage directory exists (Dynamic path for serverless environment)
+const isServerless = process.env.VERCEL === 'true' || process.env.NODE_ENV === 'production';
+const TMP_DIR = isServerless 
+  ? path.join(os.tmpdir(), 'mediaflow')
+  : path.join(process.cwd(), 'public', 'downloads');
+
 if (!fs.existsSync(TMP_DIR)) {
-  fs.mkdirSync(TMP_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(TMP_DIR, { recursive: true });
+  } catch (err) {
+    console.warn('[Downloader] Failed to create TMP_DIR, fallback to system temp:', err);
+  }
 }
 
 export interface VideoInfo {

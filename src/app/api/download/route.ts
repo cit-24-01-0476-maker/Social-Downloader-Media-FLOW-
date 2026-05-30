@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { enqueueDownloadJob } from '@/lib/queue';
+import { enqueueDownloadJob, resolveJobSynchronously } from '@/lib/queue';
 import { isSsrfSafeUrl, sanitizeInput, checkRateLimit } from '@/lib/security';
 import { detectPlatform, getPlatformAdapter } from '@/lib/platforms';
 
@@ -74,8 +74,15 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    // 7. Enqueue task to background queue
-    await enqueueDownloadJob(job.id, url, platform, formatId, browser);
+    // 7. Process or Enqueue task
+    const isVercel = process.env.VERCEL === 'true' || process.env.NODE_ENV === 'production';
+    if (isVercel) {
+      // Synchronously execute fast resolver on Vercel to prevent serverless function freeze
+      await resolveJobSynchronously(job.id, url, platform, formatId, browser);
+    } else {
+      // Asynchronously process in local / background queue
+      await enqueueDownloadJob(job.id, url, platform, formatId, browser);
+    }
 
     // Save successful log
     await db.platformRequestLog.create({
