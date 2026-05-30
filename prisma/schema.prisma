@@ -1,0 +1,68 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String          @id @default(uuid())
+  name          String?
+  email         String?         @unique
+  emailVerified DateTime?
+  image         String?
+  role          String          @default("user") // "user" | "admin"
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  jobs          DownloadJob[]
+}
+
+model DownloadJob {
+  id             String          @id @default(uuid())
+  userId         String?
+  user           User?           @relation(fields: [userId], references: [id])
+  platform       String          // "youtube" | "tiktok" | "facebook" | "instagram"
+  url            String          // Target URL
+  status         String          // "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED"
+  progress       Int             @default(0) // 0 to 100
+  downloadUrl    String?         // Legal downloadable url or local storage link
+  errorMessage   String?
+  fileSize       Int?            // size in bytes
+  contentType    String?         // "video" | "photo" | "audio"
+  title          String?
+  creatorName    String?
+  thumbnail      String?
+  duration       Int?            // in seconds
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  consentRecord  ConsentRecord?
+}
+
+model ConsentRecord {
+  id          String      @id @default(uuid())
+  jobId       String      @unique
+  job         DownloadJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  ipAddress   String
+  consentTime DateTime    @default(now())
+  consentText String      // The checkbox statement confirmed by user
+}
+
+model PlatformRequestLog {
+  id         String   @id @default(uuid())
+  ipAddress  String
+  platform   String?  // Detected platform
+  url        String
+  success    Boolean
+  action     String   // "ANALYZE" | "DOWNLOAD"
+  reason     String?  // Blocking reason if blocked
+  timestamp  DateTime @default(now())
+}
+
+model AbuseFlag {
+  id        String   @id @default(uuid())
+  target    String   // IP address, URL, or email
+  reason    String
+  flaggedAt DateTime @default(now())
+}
